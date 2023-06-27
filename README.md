@@ -1,5 +1,5 @@
-# kimm_phri_panda
-KIMM pHRI application with Padna Robot Arm
+# kimm_polaris3d
+KIMM polaris3d application with Padna Robot Arm
 
 ## 1. Prerequisites
 ### 1.1 Robot controller
@@ -22,11 +22,14 @@ git clone https://github.com/jspark861102/kimm_mujoco_ros.git -b melodic
 ```bash
 git clone https://github.com/jspark861102/kimm_aruco.git -b noetic-devel
 git clone https://github.com/jspark861102/kimm_darknet_ros.git --recursive
+git clone https://github.com/jspark861102/kimm_gb_visual_detection_3d.git -b noetic
+git clone https://github.com/IntelligentRoboticsLabs/gb_visual_detection_3d_msgs.git -b melodic
 ```
 
 ### 1.4 polaris3d beverage delivery task
 ```bash
 git clone https://github.com/jspark861102/kimm_polaris3d.git
+git clone https://github.com/jspark861102/kimm_polaris3d_smach.git
 ```
 
 ## 2. Run
