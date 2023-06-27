@@ -1,0 +1,28 @@
+<?xml version="1.0" ?>
+<launch>
+
+  <!-- <arg name="robot_ip" default="172.16.0.2" /> -->
+  <arg name="robot_ip" default="192.168.10.52" />
+  <arg name="load_gripper" default="true" />
+  
+  <param name="robot_group" type="string" value="ns0"/>  
+  <param name="issimulation" type="bool" value="false"/>
+
+  <group ns ="ns0">
+    <!-- for pinocchio -->
+    <param name="robot_urdf_path" type="string" value="$(find franka_panda_description)"/>
+    <param name="robot_urdf" type="string" value="/franka_single/panda_arm_hand_l.urdf"/>                        
+  </group>
+
+  <!-- franka_bringup -->
+  <include file="$(find franka_control)/launch/franka_control.launch" >
+    <arg name="robot_ip" value="$(arg robot_ip)" />
+    <arg name="load_gripper" value="$(arg load_gripper)" />
+  </include>
+  
+  <!-- my controller spawn -->
+  <rosparam command="load" file="$(find kimm_polaris3d)/config/kimm_polaris3d_controllers.yaml" />
+  <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false" output="screen"  args="basic_franka_controller"/>      
+
+  <!-- <node type="rviz" name="rviz" pkg="rviz" args="-d $(find kimm_polaris3d)/rviz/kimm_polaris3d_rviz.rviz" /> -->
+</launch>

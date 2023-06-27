@@ -1,0 +1,62 @@
+<launch>
+  <arg name="pub_mode" default="false"/>  <!-- true: pub all of state with 'sim_status' publisher, false: pub each own publisher -->
+  <arg name="marker_aruco" default="false"/> 
+  <arg name="yolo" default="false"/>   
+
+  <param name="robot_group" type="string" value="ns0"/>
+  <group ns ="ns0">
+    <param name="issimulation" type="bool" value="true"/>
+    
+    <!-- mujoco -->
+    <node name="mujoco_ros" pkg="mujoco_ros" type="mujoco_ros" required="true" respawn="false" output="screen">
+      <param name="license" type="string" value="$(env HOME)/.mujoco/mjkey.txt" />
+      <param name="pub_mode" value="$(arg pub_mode)"/>      
+      <param name="model_file" type="string" value="$(find franka_panda_description)/franka_single/panda_arm_hand_single_polaris3d.xml"/>
+      
+    <!-- controller -->
+    </node>
+      <node name="kimm_polaris3d_simulation" pkg="kimm_polaris3d" args="-keyboard" type="kimm_polaris3d_simulation" output="screen">
+    </node>
+
+    <!-- for pinocchio -->
+    <param name="robot_urdf_path" type="string" value="$(find franka_panda_description)"/>
+    <param name="robot_urdf" type="string" value="/franka_single/panda_arm_hand_l.urdf"/> <!-- gripper is fixed -->       
+
+    <!-- robot publish -->    
+    <param name="robot_description" textfile="$(find franka_panda_description)/franka_single/panda_arm_hand_l_d435_rviz.urdf" />
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" respawn="false" output="screen">
+            <param name="use_tf_static"     value="false"/>
+            <param name="publish_frequency" value="100"/>
+            <param name="ignore_timestamp" value="true"/>
+            <remap from="joint_states"     to="joint_states" />
+    </node>     
+
+    <group if="$(arg marker_aruco)">
+      <!-- aruco marker detector -->  
+      <include file="$(find kimm_aruco)/launch/kimm_aruco_publisher.launch">
+        <arg name="start_aruco_rviz" default="false"/>
+        <arg name="isrobot" default="true"/>
+      </include>
+    </group>
+    <group unless="$(arg marker_aruco)">
+      <node pkg="kimm_polaris3d" type="Marker_publisher.py" name="Marker_node" output="screen"> </node>
+    </group>
+
+    <group if="$(arg yolo)">
+      <include file="$(find darknet_ros_3d)/launch/darknet_ros_3d.launch">
+        <arg name="isrobot" default="true"/>
+      </include>
+    </group>
+
+    <group if="$(eval marker_aruco == true or yolo == true)">
+      <include file="$(find realsense2_camera)/launch/rs_rgbd.launch">
+            <arg name="filters"       default="pointcloud"/>            
+      </include>
+    </group>   
+    
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find kimm_polaris3d)/rviz/kimm_polaris3d_rviz.rviz" />
+    <node pkg="kimm_polaris3d_smach" type="kimm_polaris3d_smach.py" name="kimm_polaris3d_smach" output="screen"></node>
+
+  </group>
+  
+</launch>
