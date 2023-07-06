@@ -45,17 +45,6 @@ typedef struct State {
     VectorXd torque_;
     VectorXd tau_; //use to calculate ddq
 } state;   
-typedef struct Mob{
-    MatrixXd lambda_inv_;
-    MatrixXd lambda_, mass_, mass_inv_;
-    MatrixXd J_trans_;
-    MatrixXd J_trans_inv_;
-    VectorXd d_force_;
-    VectorXd d_torque_, torque_d_, torque_d_prev_;
-    VectorXd g_, nle_, coriolis_;
-    double gamma_, beta_;
-    VectorXd p_k_prev_, p_k_, alpha_k_;
-} mob;
 typedef struct Joint_Action{
     VectorXd kp_, kd_, q_target_;
     int type_;
@@ -84,6 +73,7 @@ namespace RobotController{
             void franka_update(const sensor_msgs::JointState&); // franka state update //for simulation
             void franka_update(const Vector7d&, const Vector7d&); // franka state update //for experiment            
             void franka_update(const Vector7d& q, const Vector7d& qdot, const Vector7d& tau); // franka state update //for experiment            
+            void Fext_update(const Vector6d& Fext); //for simulation & experiment
 
             void compute(const double &); // computation by hqp controller
             void franka_output(VectorXd & qacc); // joint torque of franka 
@@ -125,7 +115,7 @@ namespace RobotController{
             double noise_elimination(double x, double limit);
             void get_aruco_marker(geometry_msgs::Pose pos);
             void get_yolo_marker(geometry_msgs::Pose pos);
-
+            void eeoffset_update();            
 
             int ctrltype(){
                 return ctrl_mode_;
@@ -150,10 +140,10 @@ namespace RobotController{
             Eigen::VectorXd q_ref_;
             pinocchio::SE3 H_ee_ref_, H_mobile_ref_, T_offset_, T_vel_, T_aruco_, T_yolo_;
             Vector3d ee_offset_;
-            MatrixXd Adj_mat_, R_joint7_atHome_;
+            MatrixXd Adj_mat_;
             double est_time_, dt_;
             double joint7_to_finger_;            
-            bool initial_calibration_update_;     
+            Vector6d Fext_;
             MatrixXd Me_inv_, P_, P_inv_, P_T_, P_T_inv_;                       
 
             //hqp

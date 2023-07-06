@@ -42,6 +42,10 @@
 #include <franka_gripper/MoveAction.h>
 #include <franka_msgs/SetLoad.h>
 
+//robotiq gripper
+#include <robotiq_2f_gripper_msgs/CommandRobotiqGripperAction.h>
+#include <robotiq_2f_gripper_control/robotiq_gripper_client.h>
+
 // System
 #include <iostream>
 #include <sys/ioctl.h>
@@ -67,13 +71,17 @@ class BasicFrankaController : public controller_interface::MultiInterfaceControl
   void update(const ros::Time& time, const ros::Duration& period) override;
   void stopping(const ros::Time& /*time*/) override;
 
-  void ctrltypeCallback(const std_msgs::Int16ConstPtr &msg);
-  void mobtypeCallback(const std_msgs::Int16ConstPtr &msg);  
+  void ctrltypeCallback(const std_msgs::Int16ConstPtr &msg);  
+  void ArucoCallback(const geometry_msgs::Pose &msg);
+
 
   void asyncCalculationProc(); 
   void modeChangeReaderProc();
   void setFrankaCommand();
-  void getEEState();  
+  void pubEEState();  
+  void pubJointStates();
+
+  void robotiqstateCallback(const sensor_msgs::JointStateConstPtr &msg);
 
   void keyboard_event();
   bool _kbhit()
@@ -103,45 +111,17 @@ class BasicFrankaController : public controller_interface::MultiInterfaceControl
   Vector6d lowpassFilter(double sample_time, const Vector6d y, const Vector6d y_last, double cutoff_frequency){ //cutoff_frequency is in [Hz]
       double gain = sample_time / (sample_time + (1.0 / (2.0 * M_PI * cutoff_frequency)));
       return gain * y + (1 - gain) * y_last;
-  }
-  void InitMob(){
-      mob_.torque_d_prev_.setZero(7);
-      mob_.d_torque_.setZero(7);
-      mob_.p_k_prev_.setZero(7);         
-  }
-  void UpdateMob(){
-      franka_torque_.head(7) -= mob_.d_torque_;
-
-      mob_.gamma_ = exp(-15. * 0.001);
-      mob_.beta_ = (1- mob_.gamma_) / (mob_.gamma_ * 0.001);
-
-      mob_.coriolis_ = robot_nle_;
-      mob_.p_k_ = robot_mass_ * state_.v_;
-      mob_.alpha_k_ = mob_.beta_*mob_.p_k_ + franka_torque_.head(7) + mob_.coriolis_ - robot_g_;
-
-      mob_.torque_d_ = (mob_.gamma_-1) * mob_.alpha_k_ + mob_.beta_ * (mob_.p_k_ - mob_.gamma_ * mob_.p_k_prev_) + mob_.gamma_ * mob_.torque_d_prev_;
-      mob_.mass_inv_ = robot_mass_.inverse();
-      mob_.lambda_inv_ = robot_J_ * mob_.mass_inv_ * robot_J_.transpose();
-      mob_.lambda_ = mob_.lambda_inv_.inverse();
-
-      Eigen::MatrixXd J_trans = robot_J_.transpose();
-      Eigen::MatrixXd J_trans_inv = J_trans.completeOrthogonalDecomposition().pseudoInverse();
-
-      mob_.d_force_ = 1.0 * (mob_.mass_inv_ * J_trans *mob_.lambda_).transpose() * mob_.torque_d_;
-
-      mob_.d_torque_ = -J_trans * mob_.d_force_;
-      mob_.torque_d_prev_ = mob_.torque_d_;
-      mob_.p_k_prev_ = mob_.p_k_;
-  }
+  }  
 
  private: 
-    ros::Publisher ee_state_pub_, torque_state_pub_, joint_state_pub_, time_pub_, smach_pub_;
+    ros::Publisher ee_state_pub_, torque_state_pub_, joint_state_pub_, smach_pub_;
 
     geometry_msgs::Transform ee_state_msg_;
     std_msgs::Float32 time_msg_;
     mujoco_ros_msgs::JointSet robot_command_msg_;
     sensor_msgs::JointState robot_state_msg_;
     franka_msgs::SetLoad setload_srv;
+    sensor_msgs::JointState robotiq_state_msg_;
 
     // thread
     std::mutex calculation_mutex_;
@@ -151,10 +131,9 @@ class BasicFrankaController : public controller_interface::MultiInterfaceControl
     std::unique_ptr<franka_hw::FrankaModelHandle> model_handle_;
     std::unique_ptr<franka_hw::FrankaStateHandle> state_handle_;
     std::vector<hardware_interface::JointHandle> joint_handles_;
-    std::string group_name_;
+    std::string group_name_;    
 
-    actionlib::SimpleActionClient<franka_gripper::MoveAction> gripper_ac_{"franka_gripper/move", true};
-    actionlib::SimpleActionClient<franka_gripper::GraspAction> gripper_grasp_ac_{"franka_gripper/grasp", true};
+    robotiq_2f_gripper_control::RobotiqActionClient * gripper_robotiq_;        
 
     //franka_gripper::GraspGoal goal;
     franka_hw::TriggerRate print_rate_trigger_{100}; 
@@ -170,12 +149,11 @@ class BasicFrankaController : public controller_interface::MultiInterfaceControl
     double time_, dt_;
     bool isgrasp_, aruco_flag_;
     std_msgs::String kimm_polaris3d_smach_msg_;
-
-    Mob mob_;
-    State state_;
+    
+    State state_;    
 
     RobotController::FrankaWrapper * ctrl_;
-    ros::Subscriber ctrl_type_sub_, mob_subs_;
+    ros::Subscriber ctrl_type_sub_, robotiq_state_subs_, aruco_sub_;
 };
 
 }  // namespace kimm_franka_controllers

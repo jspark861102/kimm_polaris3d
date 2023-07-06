@@ -8,33 +8,38 @@
 #include <ros/ros.h>
 
 #include <franka/robot_state.h>
+#include <pinocchio/parsers/urdf.hpp>
 
 namespace kimm_franka_controllers
 {
 
 bool BasicFrankaController::init(hardware_interface::RobotHW* robot_hw, ros::NodeHandle& node_handle)
 {
-
   node_handle.getParam("/robot_group", group_name_);
   
-  ctrl_type_sub_ = node_handle.subscribe("/" + group_name_ + "/real_robot/ctrl_type", 1, &BasicFrankaController::ctrltypeCallback, this);
-  mob_subs_ = node_handle.subscribe("/" + group_name_ + "/real_robot/mob_type", 1, &BasicFrankaController::mobtypeCallback, this);
+  ctrl_type_sub_ = node_handle.subscribe("/" + group_name_ + "/real_robot/ctrl_type", 1, &BasicFrankaController::ctrltypeCallback, this);  
   
   torque_state_pub_ = node_handle.advertise<mujoco_ros_msgs::JointSet>("/" + group_name_ + "/real_robot/joint_set", 5);
-  joint_state_pub_ = node_handle.advertise<sensor_msgs::JointState>("/" + group_name_ + "/real_robot/joint_states", 5);
-  time_pub_ = node_handle.advertise<std_msgs::Float32>("/" + group_name_ + "/time", 1);
-
+  joint_state_pub_ = node_handle.advertise<sensor_msgs::JointState>("/" + group_name_ + "/real_robot/joint_states", 5);  
   ee_state_pub_ = node_handle.advertise<geometry_msgs::Transform>("/" + group_name_ + "/real_robot/ee_state", 5);
+  
+  //smach
   smach_pub_ = node_handle.advertise<std_msgs::String>("kimm_polaris3d/state_transition", 5);
   
-  ee_state_msg_ = geometry_msgs::Transform();  
+  //aruco  
+  aruco_sub_ = node_handle.subscribe("/" + group_name_ + "/kimm_aruco_publisher/pose", 1, &BasicFrankaController::ArucoCallback, this); 
+
+  //robotiq
+  robotiq_state_subs_ = node_handle.subscribe( "/robotiq/joint_states", 1, &BasicFrankaController::robotiqstateCallback, this);                
 
   isgrasp_ = false;    
+  gripper_robotiq_ = new robotiq_2f_gripper_control::RobotiqActionClient("/" + group_name_ + "/command_robotiq_action", true);      
+
+  //smach
   kimm_polaris3d_smach_msg_.data = "pick_and_place";
-  aruco_flag_ = true;
-  
-  gripper_ac_.waitForServer();
-  gripper_grasp_ac_.waitForServer();
+
+  //aruco
+  aruco_flag_ = true;    
 
   std::vector<std::string> joint_names;
   std::string arm_id;  
@@ -96,17 +101,46 @@ bool BasicFrankaController::init(hardware_interface::RobotHW* robot_hw, ros::Nod
 
   ctrl_ = new RobotController::FrankaWrapper(group_name_, false, node_handle);
   ctrl_->initialize();  
+
+  // gui_model for joint names
+  string model_path, urdf_name;
+  node_handle.getParam("/" + group_name_ +"/gui_urdf_path", model_path);    
+  node_handle.getParam("/" + group_name_ +"/gui_urdf_name", urdf_name);  
+  vector<string> package_dirs;
+  package_dirs.push_back(model_path);
+  string urdfFileName = package_dirs[0] + urdf_name;
+
+  pinocchio::Model gui_model;
+  pinocchio::urdf::buildModel(urdfFileName, gui_model, false);  //7 (franka) + 6 (gripper)  
+
+  robot_state_msg_.name.resize(gui_model.nq);
+  robot_state_msg_.position.resize(gui_model.nq);
+  robot_state_msg_.velocity.resize(gui_model.nq);
+  robot_state_msg_.effort.resize(gui_model.nq);
+
+  for (int j=0; j<gui_model.nq; j++){
+      robot_state_msg_.name[j] = gui_model.names[j+1]; //names[0]="universe"
+      robot_state_msg_.position[j] = 0.0;
+      robot_state_msg_.velocity[j] = 0.0;
+      robot_state_msg_.effort[j] = 0.0;
+  }  
+
+  //initialize
+  ee_state_msg_ = geometry_msgs::Transform();  
+  robot_command_msg_.torque.resize(7); // 7 (franka) 
+
+  robotiq_state_msg_.position.resize(1);
+  robotiq_state_msg_.velocity.resize(1);
   
   return true;
 }
 
 void BasicFrankaController::starting(const ros::Time& time) {  
+  ROS_INFO("Robot Controller::starting");
+
   time_ = 0.;
   dt_ = 0.001;
-
-  robot_command_msg_.torque.resize(7); // 7 (franka) 
-  robot_state_msg_.position.resize(9); // 7 (franka) + 2 (gripper)
-  robot_state_msg_.velocity.resize(9); // 7 (franka) + 2 (gripper)  
+  ctrl_->get_dt(dt_);        
 
   dq_filtered_.setZero();
   f_filtered_.setZero();
@@ -156,7 +190,7 @@ void BasicFrankaController::update(const ros::Time& time, const ros::Duration& p
   franka_dq_d_ = franka_dq_d; //Desired joint velocity [rad/s]  
   
   Eigen::Map<Eigen::Matrix<double, 6, 1>> force_franka(robot_state.O_F_ext_hat_K.data());
-  f_ = force_franka; //Estimated external wrench (force, torque) acting on stiffness frame, expressed relative to the base frame.   
+  f_ = -1 * force_franka; //Estimated external wrench (force, torque) acting on stiffness frame, expressed relative to the base frame.   
 
   // can be used
   //robot_state.tau_ext_hat_filtered.data(); //External torque, filtered. [Nm]
@@ -169,8 +203,9 @@ void BasicFrankaController::update(const ros::Time& time, const ros::Duration& p
   
   //filtering ---------------------------------------------------------------------------------//  
   dq_filtered_      = lowpassFilter( dt_,  franka_dq,  dq_filtered_,       20.0); //in Hz, Vector7d
-  f_filtered_       = lowpassFilter( dt_,  f_,         f_filtered_,        20.0); //in Hz, Vector6d  
-  
+  f_filtered_       = lowpassFilter( dt_,  f_,         f_filtered_,        5.0); //in Hz, Vector6d  
+  ctrl_->Fext_update(f_filtered_);    // send Fext to controller
+
   // thread for franka state update to HQP -----------------------------------------------------//
   if (calculation_mutex_.try_lock())
   {
@@ -200,20 +235,19 @@ void BasicFrankaController::update(const ros::Time& time, const ros::Duration& p
   ctrl_->compute(time_);  
   ctrl_->franka_output(franka_qacc_); 
 
-  // ctrl_->ddq(franka_ddq_);               //ddq is obtained from pinocchio ABA algorithm  
-  // ctrl_->mass(robot_mass_);              //use franka api mass, not pinocchio mass
-  robot_mass_(4, 4) *= 6.0;                 //practical term? for gain tuining?
-  robot_mass_(5, 5) *= 6.0;                 //practical term? for gain tuining?
-  robot_mass_(6, 6) *= 10.0;                //practical term? for gain tuining?
+  //for practical manipulation--------------------//    
+  robot_mass_(4, 4) *= 6.0;                 //rotational inertia increasing
+  robot_mass_(5, 5) *= 6.0;                 //rotational inertia increasing
+  robot_mass_(6, 6) *= 10.0;                //rotational inertia increasing
   franka_torque_ = robot_mass_ * franka_qacc_ + robot_nle_;  
 
-  MatrixXd Kd(7, 7); // this is practical term
+  MatrixXd Kd(7, 7);
   Kd.setIdentity();
   Kd = 2.0 * sqrt(5.0) * Kd;
   Kd(5, 5) = 0.2;
   Kd(4, 4) = 0.2;
   Kd(6, 6) = 0.2; 
-  franka_torque_ -= Kd * dq_filtered_;  
+  franka_torque_ -= Kd * dq_filtered_; //additional damping torque (independent of mass matrix)
   
   // torque saturation--------------------//  
   franka_torque_ << this->saturateTorqueRate(franka_torque_, robot_tau_d_); 
@@ -224,17 +258,11 @@ void BasicFrankaController::update(const ros::Time& time, const ros::Duration& p
 
   //Publish ------------------------------------------------------------------------//
   time_ += dt_;
-  time_msg_.data = time_;
-  time_pub_.publish(time_msg_);    
+  time_msg_.data = time_;  
 
-  this->getEEState(); //just update ee_state_msg_ by pinocchio and publish it
-  
-  for (int i=0; i<7; i++){  // just update franka state(franka_q_, dq_filtered_) 
-      robot_state_msg_.position[i] = franka_q(i);
-      robot_state_msg_.velocity[i] = dq_filtered_(i);
-  }
-  joint_state_pub_.publish(robot_state_msg_);
-    
+  this->pubEEState();                  //just update ee_state_msg_ by pinocchio and publish it
+  this->pubJointStates();        
+
   this->setFrankaCommand(); //just update robot_command_msg_ by franka_torque_ 
   torque_state_pub_.publish(robot_command_msg_);
 
@@ -242,15 +270,18 @@ void BasicFrankaController::update(const ros::Time& time, const ros::Duration& p
   if (print_rate_trigger_())
   {
     // ROS_INFO("--------------------------------------------------");
-    // ROS_INFO_STREAM("robot_mass_ :" << robot_mass_);
-    // ROS_INFO_STREAM("m_load_ :" << m_load_);
-    // ROS_INFO_STREAM("odom_lpf_ :" << odom_lpf_.transpose());
+    // ROS_INFO_STREAM("robot_mass_ :" << robot_mass_);    
   }
 }
 
 void BasicFrankaController::stopping(const ros::Time& time){
     ROS_INFO("Robot Controller::stopping");
 } 
+
+void BasicFrankaController::robotiqstateCallback(const sensor_msgs::JointStateConstPtr &msg)
+{
+    robotiq_state_msg_ = *msg;   
+}
 
 void BasicFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr &msg){
   // calculation_mutex_.lock();
@@ -262,24 +293,14 @@ void BasicFrankaController::ctrltypeCallback(const std_msgs::Int16ConstPtr &msg)
   }
   else {
       if (isgrasp_){
-          isgrasp_=false;
-          franka_gripper::MoveGoal goal;
-          goal.speed = 0.1;
-          goal.width = 0.08;
-          gripper_ac_.sendGoal(goal);
+          cout << "Release hand" << endl;
+          isgrasp_ = false;
+          gripper_robotiq_->open();
       }
       else{
-
+          cout << "Grasp object" << endl;
           isgrasp_ = true; 
-          franka_gripper::GraspGoal goal;
-          franka_gripper::GraspEpsilon epsilon;
-          epsilon.inner = 0.02;
-          epsilon.outer = 0.05;
-          goal.speed = 0.1;
-          goal.width = 0.02;
-          goal.force = 40.0;
-          goal.epsilon = epsilon;
-          gripper_grasp_ac_.sendGoal(goal);
+          gripper_robotiq_->close(0.5, 220, false);            
       }
   }
   // calculation_mutex_.unlock();
@@ -310,6 +331,49 @@ Eigen::Matrix<double, 7, 1> BasicFrankaController::saturateTorqueRate(
   return tau_d_saturated;
 }
 
+void BasicFrankaController::ArucoCallback(const geometry_msgs::Pose &msg){
+    if (!aruco_flag_){
+        ctrl_->get_aruco_marker(msg);
+        aruco_flag_ = true;
+    } 
+}
+
+void BasicFrankaController::pubJointStates(){  
+  int index_count = 0;
+  robot_state_msg_.header.stamp = ros::Time::now();      
+  
+  // franka update
+  for (int i=0; i<7; i++){  
+    robot_state_msg_.position[i+index_count] = franka_q_(i);
+    robot_state_msg_.velocity[i+index_count] = dq_filtered_(i);        
+  }
+  index_count += 7;  
+  
+  //robotiq gripper    
+  robot_state_msg_.position[0+index_count] = +robotiq_state_msg_.position[0];
+  robot_state_msg_.velocity[0+index_count] = +robotiq_state_msg_.velocity[0];
+
+  robot_state_msg_.position[1+index_count] = +robotiq_state_msg_.position[0];
+  robot_state_msg_.velocity[1+index_count] = +robotiq_state_msg_.velocity[0];
+
+  robot_state_msg_.position[2+index_count] = -robotiq_state_msg_.position[0];
+  robot_state_msg_.velocity[2+index_count] = -robotiq_state_msg_.velocity[0];
+
+  robot_state_msg_.position[3+index_count] = -robotiq_state_msg_.position[0];
+  robot_state_msg_.velocity[3+index_count] = -robotiq_state_msg_.velocity[0];
+
+  robot_state_msg_.position[4+index_count] = +robotiq_state_msg_.position[0];
+  robot_state_msg_.velocity[4+index_count] = +robotiq_state_msg_.velocity[0];
+
+  robot_state_msg_.position[5+index_count] = -robotiq_state_msg_.position[0];
+  robot_state_msg_.velocity[5+index_count] = -robotiq_state_msg_.velocity[0];                              
+      
+  index_count += 6;  
+
+  //publish
+  joint_state_pub_.publish(robot_state_msg_);
+}
+
 void BasicFrankaController::setFrankaCommand(){  
   robot_command_msg_.MODE = 1;
   robot_command_msg_.header.stamp = ros::Time::now();
@@ -319,7 +383,7 @@ void BasicFrankaController::setFrankaCommand(){
       robot_command_msg_.torque[i] = franka_torque_(i);   
 }
 
-void BasicFrankaController::getEEState(){
+void BasicFrankaController::pubEEState(){
     Vector3d pos;
     Quaterniond q;
     ctrl_->ee_state(pos, q);
@@ -357,63 +421,66 @@ void BasicFrankaController::modeChangeReaderProc(){
           cout << " " << endl;
           cout << "home position" << endl;
           cout << " " << endl;
-          break;
-      case 'a': //rotate ee in -y aixs
-          msg = 2;
-          ctrl_->ctrl_update(msg);
+          break;      
+
+      case 'x': //aruco marker save
+          aruco_flag_ = false;                      
           cout << " " << endl;
-          cout << "rotate ee 15deg in -y aixs" << endl;
+          cout << "aruco marker save" << endl;
           cout << " " << endl;
-          break;
-      case 'q': //transition pos
-          msg = 10;
-          ctrl_->ctrl_update(msg);
-          cout << " " << endl;
-          cout << "transition" << endl;
-          cout << " " << endl;
-          break;                                      
-      case 'w': //bottle recognitiono pos
+          break;               
+      
+      case 'q': //init position w.r.t ereon
           msg = 11;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "bottle recognitiono" << endl;
+          cout << "init position w.r.t ereon" << endl;
           cout << " " << endl;
-          break;                    
-      case 'e': //approach to target bottle
+          break;  
+      case 'w': //transition pos to place bottle
           msg = 12;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "approach to target bottle" << endl;
+          cout << "transition pos to place bottle" << endl;
           cout << " " << endl;
-          break;                    
-      case 'r': //bottle pick pos
+          break; 
+      case 'e': //go to ereon plate to place bottle
           msg = 13;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "bottle pick" << endl;
+          cout << "go to ereon plate to place bottle" << endl;
           cout << " " << endl;
-          break;                    
-      case 't': //approach to robot
-          msg = 14;
+          break;                                                   
+      
+      case 'a': //init position w.r.t. bottle
+          msg = 21;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "approach to robot" << endl;
+          cout << "init position w.r.t. bottle" << endl;
           cout << " " << endl;
-          break;                    
-      case 'y': //bottle place pos
-          msg = 15;
-          ctrl_->ctrl_update(msg);
-          cout << " " << endl;
-          cout << "bottle place" << endl;
-          cout << " " << endl;
-          break;                    
-      case 'v': //impedance control
+          break; 
+      case 's': //transition pos to pick bottle
           msg = 22;
           ctrl_->ctrl_update(msg);
           cout << " " << endl;
-          cout << "impedance control" << endl;
+          cout << "transition pos to pick bottle" << endl;
           cout << " " << endl;
-          break;   
+          break; 
+      case 'd': //bottle pick pos
+          msg = 23;
+          ctrl_->ctrl_update(msg);
+          cout << " " << endl;
+          cout << "bottle pick pos" << endl;
+          cout << " " << endl;
+          break;                
+                       
+      // case 'v': //impedance control
+      //     msg = 22;
+      //     ctrl_->ctrl_update(msg);
+      //     cout << " " << endl;
+      //     cout << "impedance control" << endl;
+      //     cout << " " << endl;
+      //     break;   
 
       case 'i': //move ee +0.1z
           msg = 31;
@@ -457,21 +524,7 @@ void BasicFrankaController::modeChangeReaderProc(){
           cout << " " << endl;
           cout << "move ee +0.1 y" << endl;
           cout << " " << endl;
-          break;       
-
-      case 'x': //aruco marker pos save
-          aruco_flag_ = false;                      
-          cout << " " << endl;
-          cout << "aruco marker save" << endl;
-          cout << " " << endl;
-          break;   
-      case 'c': //approach to aruco marker
-          msg = 40;
-          ctrl_->ctrl_update(msg);        
-          cout << " " << endl;
-          cout << "approach to aruco marker" << endl;
-          cout << " " << endl;
-          break;   
+          break;             
 
       case ']': //start pick and place process with smach
           smach_pub_.publish(kimm_polaris3d_smach_msg_);                
@@ -490,26 +543,15 @@ void BasicFrankaController::modeChangeReaderProc(){
 
       case 'z': //grasp
           msg = 899;
-          if (isgrasp_){           
+          if (isgrasp_){
               cout << "Release hand" << endl;
               isgrasp_ = false;
-              franka_gripper::MoveGoal goal;
-              goal.speed = 0.1;
-              goal.width = 0.08;
-              gripper_ac_.sendGoal(goal);
+              gripper_robotiq_->open(false);
           }
           else{
               cout << "Grasp object" << endl;
               isgrasp_ = true; 
-              franka_gripper::GraspGoal goal;
-              franka_gripper::GraspEpsilon epsilon;
-              epsilon.inner = 0.02;
-              epsilon.outer = 0.05;
-              goal.speed = 0.1;
-              goal.width = 0.02;
-              goal.force = 40.0;
-              goal.epsilon = epsilon;
-              gripper_grasp_ac_.sendGoal(goal);
+              gripper_robotiq_->close(0.5, 50, false);                
           }
           break;
       case '\n':

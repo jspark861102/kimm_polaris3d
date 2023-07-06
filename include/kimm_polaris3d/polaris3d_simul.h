@@ -21,7 +21,7 @@
 #include <tf/transform_broadcaster.h>
 #include <tf/transform_listener.h>
 
-#include <gb_visual_detection_3d_msgs/BoundingBoxes3d.h>
+// #include <gb_visual_detection_3d_msgs/BoundingBoxes3d.h>
 #include <visualization_msgs/MarkerArray.h>
 
 ros::Publisher mujoco_command_pub_;
@@ -44,7 +44,6 @@ std_msgs::String sim_run_msg_;
 std_msgs::String kimm_polaris3d_smach_msg_;
 
 RobotController::FrankaWrapper * ctrl_;
-Mob mob_;
 State state_;
 
 // void YoloCallback(const gb_visual_detection_3d_msgs::BoundingBoxes3d &msg);

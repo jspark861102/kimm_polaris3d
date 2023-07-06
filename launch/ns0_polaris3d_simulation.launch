@@ -4,14 +4,13 @@
   <arg name="yolo" default="false"/>   
 
   <param name="robot_group" type="string" value="ns0"/>
-  <group ns ="ns0">
-    <param name="issimulation" type="bool" value="true"/>
-    
+
+  <group ns ="ns0">    
     <!-- mujoco -->
     <node name="mujoco_ros" pkg="mujoco_ros" type="mujoco_ros" required="true" respawn="false" output="screen">
       <param name="license" type="string" value="$(env HOME)/.mujoco/mjkey.txt" />
       <param name="pub_mode" value="$(arg pub_mode)"/>      
-      <param name="model_file" type="string" value="$(find franka_panda_description)/franka_single/panda_arm_hand_single_polaris3d.xml"/>
+      <param name="model_file" type="string" value="$(find franka_panda_description)/franka_single/mujoco_simulation_polaris3d.xml"/>
       
     <!-- controller -->
     </node>
@@ -20,10 +19,10 @@
 
     <!-- for pinocchio -->
     <param name="robot_urdf_path" type="string" value="$(find franka_panda_description)"/>
-    <param name="robot_urdf" type="string" value="/franka_single/panda_arm_hand_l.urdf"/> <!-- gripper is fixed -->       
+    <param name="robot_urdf" type="string" value="/franka_single/fr3_arm_2f_85_d435.urdf"/> <!-- gripper is fixed -->       
 
     <!-- robot publish -->    
-    <param name="robot_description" textfile="$(find franka_panda_description)/franka_single/panda_arm_hand_l_d435_rviz.urdf" />
+    <param name="robot_description" textfile="$(find franka_panda_description)/franka_single/fr3_arm_2f_85_d435_rviz.urdf" />
     <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" respawn="false" output="screen">
             <param name="use_tf_static"     value="false"/>
             <param name="publish_frequency" value="100"/>

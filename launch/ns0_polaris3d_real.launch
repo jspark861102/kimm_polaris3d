@@ -2,17 +2,12 @@
 <launch>
 
   <!-- <arg name="robot_ip" default="172.16.0.2" /> -->
-  <arg name="robot_ip" default="192.168.10.52" />
-  <arg name="load_gripper" default="true" />
-  
-  <param name="robot_group" type="string" value="ns0"/>  
-  <param name="issimulation" type="bool" value="false"/>
+  <arg name="robot_ip" default="192.168.10.152" />
+  <arg name="load_gripper" default="false" />
+  <arg name="marker_aruco" default="false"/> 
+  <arg name="yolo" default="false"/>   
 
-  <group ns ="ns0">
-    <!-- for pinocchio -->
-    <param name="robot_urdf_path" type="string" value="$(find franka_panda_description)"/>
-    <param name="robot_urdf" type="string" value="/franka_single/panda_arm_hand_l.urdf"/>                        
-  </group>
+  <param name="robot_group" type="string" value="ns0"/>  
 
   <!-- franka_bringup -->
   <include file="$(find franka_control)/launch/franka_control.launch" >
@@ -20,9 +15,55 @@
     <arg name="load_gripper" value="$(arg load_gripper)" />
   </include>
   
-  <!-- my controller spawn -->
-  <rosparam command="load" file="$(find kimm_polaris3d)/config/kimm_polaris3d_controllers.yaml" />
-  <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false" output="screen"  args="basic_franka_controller"/>      
+  <group ns ="ns0">
+    <!-- for pinocchio -->
+    <param name="robot_urdf_path" type="string" value="$(find franka_panda_description)"/>
+    <param name="robot_urdf" type="string" value="/franka_single/fr3_arm_2f_85_d435.urdf"/> <!-- gripper is fixed -->
 
-  <!-- <node type="rviz" name="rviz" pkg="rviz" args="-d $(find kimm_polaris3d)/rviz/kimm_polaris3d_rviz.rviz" /> -->
+    <!-- for joint name for gui -->
+    <param name="gui_urdf_path" type="string" value="$(find franka_panda_description)"/>
+    <param name="gui_urdf_name" type="string" value="/franka_single/fr3_arm_2f_85_d435_rviz.urdf"/>
+
+    <!-- for tf -->
+    <param name="robot_description" textfile="$(find franka_panda_description)/franka_single/fr3_arm_2f_85_d435_rviz.urdf"/>
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" respawn="true">        
+      <remap from="joint_states" to="real_robot/joint_states" />
+    </node>     
+
+    <group if="$(arg marker_aruco)">
+      <!-- aruco marker detector -->  
+      <include file="$(find kimm_aruco)/launch/kimm_aruco_publisher.launch">
+        <arg name="start_aruco_rviz" default="false"/>
+        <arg name="isrobot" default="true"/>
+      </include>
+    </group>
+    <group unless="$(arg marker_aruco)">
+      <node pkg="kimm_polaris3d" type="Marker_publisher.py" name="Marker_node" output="screen"> </node>
+    </group>
+
+    <group if="$(arg yolo)">
+      <include file="$(find darknet_ros_3d)/launch/darknet_ros_3d.launch">
+        <arg name="isrobot" default="true"/>
+      </include>
+    </group>
+
+    <group if="$(eval marker_aruco == true or yolo == true)">
+      <include file="$(find realsense2_camera)/launch/rs_rgbd.launch">
+            <arg name="filters"       default="pointcloud"/>            
+      </include>
+    </group>    
+
+    <!-- rqt -->    
+    <!-- <node type="rviz" name="rviz" pkg="rviz" args="-d $(find kimm_polaris3d)/rviz/kimm_polaris3d_rviz.rviz" /> -->
+    
+    <!-- state machine -->
+    <node pkg="kimm_polaris3d_smach" type="kimm_polaris3d_smach.py" name="kimm_polaris3d_smach" output="screen"></node>
+
+  </group>  
+  
+  <!-- my controller spawn -->
+  <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false" output="screen"  args="basic_franka_controller"/>        
+
+  <!-- rosparam upload -->
+  <rosparam command="load" file="$(find kimm_polaris3d)/config/kimm_polaris3d_controllers.yaml" />  
 </launch>

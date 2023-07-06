@@ -55,56 +55,33 @@ namespace RobotController{
         // tasks
         postureTask_ = std::make_shared<TaskJointPosture>("task-posture", *robot_);
         VectorXd posture_gain(na_);
-        if (!issimulation_) //for real
-        	// posture_gain << 200., 200., 200., 200., 200., 200., 200.;
-            // posture_gain << 250., 150., 250., 100., 100., 100., 100.;
-            // posture_gain << 100., 100., 100., 100., 100., 100., 100.;            
-            posture_gain << 100., 100., 100., 200., 200., 200., 200.;
-        else // for simulation
-        	// posture_gain << 4000., 4000., 4000., 4000., 4000., 4000., 4000.;
-            posture_gain << 40000., 40000., 40000., 40000., 40000., 40000., 40000.;            
+        if (!issimulation_) //for real        	            
+            // posture_gain << 100., 100., 100., 200., 200., 200., 200.;
+            posture_gain << 300., 300., 300., 600., 600., 600., 1200.;
+        else // for simulation        	
+            // posture_gain << 40000., 40000., 40000., 40000., 40000., 40000., 40000.;            
+            posture_gain << 80000., 80000., 80000., 80000., 80000., 80000., 80000.;            
 
         postureTask_->Kp(posture_gain);
         postureTask_->Kd(2.0*postureTask_->Kp().cwiseSqrt());
         
-        //////////////////// EE offset ////////////////////////////////////////        
-        Matrix3d Rx, Rz;
-        double anglex = -180.0*M_PI/180.0;
-        double anglez =   45.0*M_PI/180.0;
-        rotx(anglex, Rx);
-        rotz(anglez, Rz);   
-        R_joint7_atHome_ = Rz * Rx;
-
+        //////////////////// EE offset ////////////////////////////////////////                
         //When offset is applied, the control characteristics seems to be changed (gain tuning is needed)
         //This offset is applied to both reference (in this code) and feedback (in task_se3_equality.cpp)
-        joint7_to_finger_ = 0.2054; //0.2054 (z-axis) = 0.107(distance from joint7 to hand) + 0.0584(hand length) + 0.04(finger length)         
-        
-        // ee_offset_ << 0.0, 0.0, 0.0; //offset is applied w.r.t. joint7 LOCAL coordinate    
-        ee_offset_ = R_joint7_atHome_ * Vector3d(0.0, 0.0, -joint7_to_finger_); //global to local
-        // ee_offset_ = R_joint7_atHome_ * Vector3d(0.0, 0.4, -joint7_to_finger_); //global to local
-
-        T_offset_.setIdentity();
-        T_offset_.translation(ee_offset_);                
-
-        Adj_mat_.resize(6,6);
-        Adj_mat_.setIdentity();
-        Adj_mat_.topRightCorner(3,3) = -1 * skew_matrix(ee_offset_); //due to "A cross B = -B cross A"        
+        //robotiq
+        joint7_to_finger_ = 0.247; //0.247 (z-axis) = 0.222(distance from link7 to left_inner_finger) + 0.025(finger center length)                 
+        this->eeoffset_update(); //pair with home position            
         ///////////////////////////////////////////////////////////////////////        
 
-        VectorXd ee_gain(6);
-        if (ee_offset_(0) != 0.0 | ee_offset_(1) != 0.0 | ee_offset_(2) != 0.0){         
-            if (!issimulation_) { //for real                
-                ee_gain << 100., 100., 100., 400., 400., 600.;                
-            }
-            else { //for simulation
-                // ee_gain << 500., 500., 500., 800., 800., 1000.;
-                ee_gain << 1000., 1000., 1000., 2000., 2000., 2000.;
-            }                        
+        VectorXd ee_gain(6);        
+        if (!issimulation_) { //for real                
+            ee_gain << 100., 100., 100., 400., 400., 600.;                
         }
-        else{
-            ee_gain << 100., 100., 100., 400., 400., 600.;
-            // ee_gain << 100., 100., 100., 200., 200., 200.;
-        }           
+        else { //for simulation
+            // ee_gain << 500., 500., 500., 800., 800., 1000.;
+            ee_gain << 1000., 1000., 1000., 2000., 2000., 2000.;
+        }  
+
         eeTask_ = std::make_shared<TaskSE3Equality>("task-se3", *robot_, "panda_joint7", ee_offset_); //here, ee_offset_ is applied to current pos value
         eeTask_->Kp(ee_gain*Vector::Ones(6));
         eeTask_->Kd(2.0*eeTask_->Kp().cwiseSqrt());        
@@ -135,12 +112,23 @@ namespace RobotController{
         solver_ = SolverHQPFactory::createNewSolver(SOLVER_HQP_QPOASES, "qpoases");
 
         // service
-        reset_control_ = true; 
-        initial_calibration_update_ = false;  
+        reset_control_ = true;         
 
         //inertia shaping
         Me_inv_.resize(6,6);
-        Me_inv_.setIdentity();                 
+        Me_inv_.setIdentity();                
+        eeTask_->setDesiredinertia(MatrixXd::Identity(6,6)); 
+    }    
+
+    void FrankaWrapper::eeoffset_update(){         
+        ee_offset_ = Vector3d(0.0, 0.0, joint7_to_finger_); //w.r.t joint7
+
+        T_offset_.setIdentity();
+        T_offset_.translation(ee_offset_);                
+
+        Adj_mat_.resize(6,6);
+        Adj_mat_.setIdentity();
+        Adj_mat_.topRightCorner(3,3) = -1 * skew_matrix(ee_offset_); //due to "A cross B = -B cross A"
     }
 
     void FrankaWrapper::franka_update(const sensor_msgs::JointState& msg){ //for simulation (mujoco)
@@ -168,6 +156,12 @@ namespace RobotController{
         state_.tau_.tail(na_) = tau;
     }         
 
+    void FrankaWrapper::Fext_update(const Vector6d& Fext){ //for simulation & experiment
+        Fext_ = Fext;
+
+        // cout << Fext_.transpose() << endl;
+    }
+
     void FrankaWrapper::ctrl_update(const int& msg){
         ctrl_mode_ = msg;
         ROS_INFO("[ctrltypeCallback] %d", ctrl_mode_);
@@ -185,19 +179,23 @@ namespace RobotController{
         }
         if (ctrl_mode_ == 1){ //h //init position
             if (mode_change_){                
+                //remove
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
-
+                
+                //add
                 tsid_->addMotionTask(*postureTask_, 1e-2, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);                
 
+                //posture
                 q_ref_.setZero(7);
-                q_ref_(0) =  0;//M_PI /4.0;
-                q_ref_(1) = 0.0 * M_PI / 180.0;
+                q_ref_(0) =  0.0;
+                q_ref_(1) =  0.0;
                 q_ref_(3) = -M_PI / 2.0;
-                q_ref_(5) = M_PI/ 2.0;
-                q_ref_(6) = -M_PI/ 4.0;
+                q_ref_(5) =  M_PI / 2.0;
+                // q_ref_(6) = -M_PI / 2.0;
+                q_ref_(6) =  0.0;
 
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
                 trajPosture_Cubic_->setDuration(4.0);
@@ -216,259 +214,49 @@ namespace RobotController{
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_); 
 
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+        }  
 
-        }   
-        if (ctrl_mode_ == 2){ //a //rotate ee in -y aixs
-            if (mode_change_){
-                //remove                
+        if (ctrl_mode_ == 11){ //q //init position w.r.t ereon
+            if (mode_change_){                
+                //remove
                 tsid_->removeTask("task-se3");
                 tsid_->removeTask("task-posture");
                 tsid_->removeTask("task-torque-bounds");
 
                 //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*postureTask_, 1e-2, 1);
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                tsid_->addMotionTask(*eeTask_, 1.0, 0);                
-
+                
                 //posture
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-                trajPosture_Cubic_->setDuration(2.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                //ee
-                trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(2.0);                
-
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
-                trajEE_Cubic_->setInitSample(H_ee_ref_); 
-                cout << "initial" << endl;
-                cout << H_ee_ref_ << endl;                
-
-                Matrix3d Rx, Ry, Rz;
-                Rx.setIdentity();
-                Ry.setIdentity();                
-                double angle = 15.0*M_PI/180.0;
-                double anglex = -angle;
-                double angley = angle; //Both x&y is applied because joint7 is rotate pi/4 w.r.t. global coordinate.
-                rotx(anglex, Rx);
-                roty(angley, Ry);                
-                
-                SE3 T_rot;
-                T_rot.setIdentity();
-                T_rot.rotation(Rx*Ry);                                                
-                
-                H_ee_ref_ = H_ee_ref_ * T_rot;                                                                
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
-                cout << "goal" << endl;
-                cout << H_ee_ref_ << endl;
-
-                reset_control_ = false;
-                mode_change_ = false;
-            }
-           
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            trajEE_Cubic_->setCurrentTime(time_);
-            sampleEE_ = trajEE_Cubic_->computeNext();
-            eeTask_->setReference(sampleEE_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));            
-        }  
-        if (ctrl_mode_ == 10){ //q //transition pos
-            if (mode_change_){     
-                //remove                           
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-
-                q_ref_.setZero(7);                
-                q_ref_(0) = -0.503;
-                q_ref_(1) =  0.0;
-                q_ref_(2) = -2.0;
-                q_ref_(3) = -M_PI / 6.0;                
-                q_ref_(5) =  M_PI / 2.0;
-                q_ref_(6) = -M_PI / 4.0;
+                q_ref_.setZero(7);
+                q_ref_(0) =  5.0 * M_PI / 180.0;
+                q_ref_(1) =  45.0 * M_PI / 180.0;
+                q_ref_(2) = -11.0 * M_PI / 180.0;
+                q_ref_(3) = -118.0 * M_PI / 180.0;
+                q_ref_(4) =  80.0  * M_PI / 180.0;
+                q_ref_(5) =  110.0  * M_PI / 180.0;
+                q_ref_(6) = -74.0  * M_PI / 180.0;
 
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
                 trajPosture_Cubic_->setDuration(4.0);
                 trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);                
 
                 reset_control_ = false;
-                mode_change_ = false;                
-            }
+                mode_change_ = false;             
+            }            
 
             trajPosture_Cubic_->setCurrentTime(time_);
             samplePosture_ = trajPosture_Cubic_->computeNext();
             postureTask_->setReference(samplePosture_);
 
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            //in here, task.compute is performed right after the reference is set.
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_); 
 
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-        }     
-        if (ctrl_mode_ == 11){ //w //bottle recognitiono pos
-            if (mode_change_){     
-                //remove                           
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
+        }   
 
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-
-                q_ref_.setZero(7);                
-                q_ref_(0) =  -0.503;
-                q_ref_(1) =   0.777;
-                q_ref_(2) =  -2.714;
-                q_ref_(3) =  -2.041;
-                q_ref_(4) =   1.149;
-                q_ref_(5) =   1.387;
-                q_ref_(6) =  -0.726;
-
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-                trajPosture_Cubic_->setDuration(4.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                reset_control_ = false;
-                mode_change_ = false;                
-            }
-
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-        }               
-        if (ctrl_mode_ == 12){ //e //approach to target bottle
-            if (mode_change_){     
-                //remove                           
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-
-                q_ref_.setZero(7);                
-                q_ref_(0) =  -0.394;
-                q_ref_(1) =   0.608;
-                q_ref_(2) =  -2.125;
-                q_ref_(3) =  -2.440;
-                q_ref_(4) =   2.173;
-                q_ref_(5) =   1.817;
-                q_ref_(6) =  -1.222;
-
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-                trajPosture_Cubic_->setDuration(4.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                reset_control_ = false;
-                mode_change_ = false;                
-            }
-
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-        }  
-        if (ctrl_mode_ == 13){ //r //bottle pick pos
-            if (mode_change_){
-                //remove                
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-16, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                tsid_->addMotionTask(*eeTask_, 1.0, 0);
-
-                //posture (try to maintain current joint configuration)
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-                trajPosture_Cubic_->setDuration(2.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
-
-                //ee
-                trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(2.0);
-
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
-                trajEE_Cubic_->setInitSample(H_ee_ref_);
-                H_ee_ref_.translation()(1) -= 0.1;                
-                H_ee_ref_.translation()(2) -= 0.00;                
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
-
-                reset_control_ = false;
-                mode_change_ = false;                
-            }
-
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            trajEE_Cubic_->setCurrentTime(time_);
-            sampleEE_ = trajEE_Cubic_->computeNext();
-            eeTask_->setReference(sampleEE_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
-        }    
-        if (ctrl_mode_ == 14){ //t //approach to robot
-            if (mode_change_){     
-                //remove                           
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-
-                q_ref_.setZero(7);                                
-                q_ref_(0) =   0.077;
-                q_ref_(1) =   0.471;
-                q_ref_(2) =  -0.182;
-                q_ref_(3) =  -1.674;
-                q_ref_(4) =   1.619;
-                q_ref_(5) =   1.421;
-                q_ref_(6) =  -1.284;
-
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-                trajPosture_Cubic_->setDuration(4.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
-
-                reset_control_ = false;
-                mode_change_ = false;                
-            }
-
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-        }                             
-        if (ctrl_mode_ == 15){ //y //bottle place pos
+        if (ctrl_mode_ == 12){ //w //transition pos to place bottle
             if (mode_change_){
                 //remove                
                 tsid_->removeTask("task-se3");
@@ -482,19 +270,21 @@ namespace RobotController{
 
                 //posture (try to maintain current4 joint configuration)
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-                trajPosture_Cubic_->setDuration(2.0);
+                trajPosture_Cubic_->setDuration(4.0);
                 trajPosture_Cubic_->setStartTime(time_);
                 trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
 
                 //ee
                 trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(2.0);
+                trajEE_Cubic_->setDuration(4.0);
 
                 H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
-                trajEE_Cubic_->setInitSample(H_ee_ref_);
-                H_ee_ref_.translation()(1) += 0.2;                
-                H_ee_ref_.translation()(2) += 0.08;                
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
+                trajEE_Cubic_->setInitSample(H_ee_ref_);                       
+                
+                pinocchio::SE3 T_aruco_offset;                
+                T_aruco_offset.setIdentity();
+                T_aruco_offset.translation(Vector3d(0.0, -0.17, -0.15));
+                trajEE_Cubic_->setGoalSample(T_aruco_ * T_aruco_offset);
 
                 reset_control_ = false;
                 mode_change_ = false;                
@@ -510,8 +300,9 @@ namespace RobotController{
 
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
-        }            
-        if (ctrl_mode_ == 22){ //v //impedance control
+        }             
+
+        if (ctrl_mode_ == 13){ //e //go to ereon plate to place bottle
             if (mode_change_){
                 //remove                
                 tsid_->removeTask("task-se3");
@@ -519,57 +310,286 @@ namespace RobotController{
                 tsid_->removeTask("task-torque-bounds");
 
                 //add
-                tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+                tsid_->addMotionTask(*postureTask_, 1e-16, 1);
                 tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
                 tsid_->addMotionTask(*eeTask_, 1.0, 0);
 
-                //posture
+                //posture (try to maintain current4 joint configuration)
                 trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-                trajPosture_Cubic_->setDuration(2.0);
+                trajPosture_Cubic_->setDuration(4.0);
                 trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(q_ref_);
+                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
 
                 //ee
                 trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(2.0);
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
+                trajEE_Cubic_->setDuration(4.0);
 
-                trajEE_Cubic_->setInitSample(H_ee_ref_);
-                trajEE_Cubic_->setGoalSample(H_ee_ref_);
-               
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
+                trajEE_Cubic_->setInitSample(H_ee_ref_);                       
+                
+                pinocchio::SE3 T_aruco_offset;                
+                T_aruco_offset.setIdentity();
+                T_aruco_offset.translation(Vector3d(0.0, -0.12, 0.05));
+                trajEE_Cubic_->setGoalSample(T_aruco_ * T_aruco_offset);
+
                 reset_control_ = false;
-                mode_change_ = false;                                                
+                mode_change_ = false;                
             }
-            
+
             trajPosture_Cubic_->setCurrentTime(time_);
             samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);                        
-            
-            if (1) { 
-                //to make K(x-xd)=0, put xd=x 
-                H_ee_ref_.translation() = (robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_).translation();
-                
-                //inertia shaping    
-                // Me_inv_ = 
-                eeTask_->setDesiredinertia(Me_inv_);
-            }
-            else {   
-                //to make K(x-xd)=0, put K=0 
-                Vector6d a;
-                a = eeTask_->Kp();
-                a.head(3) << 0.0, 0.0, 0.0;
-                eeTask_->Kp(a); //after this task, Kp should be returned to original gain
-            }                        
+            postureTask_->setReference(samplePosture_);
 
-            SE3ToVector(H_ee_ref_, sampleEE_.pos);
-
+            trajEE_Cubic_->setCurrentTime(time_);
+            sampleEE_ = trajEE_Cubic_->computeNext();
             eeTask_->setReference(sampleEE_);
-            //////////////////
 
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
-        }            
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
+        } 
+        
+        if (ctrl_mode_ == 21){ //a //init position w.r.t. bottle
+            if (mode_change_){                
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
 
+                tsid_->addMotionTask(*postureTask_, 1e-2, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+
+                q_ref_.setZero(7);
+                q_ref_(0) = -13.0 * M_PI / 180.0;
+                q_ref_(1) =  30.0 * M_PI / 180.0;
+                q_ref_(2) =  11.0 * M_PI / 180.0;
+                q_ref_(3) = -123.0 * M_PI / 180.0;
+                q_ref_(4) = -80.0  * M_PI / 180.0;
+                q_ref_(5) =  113.0  * M_PI / 180.0;
+                q_ref_(6) = -118.0  * M_PI / 180.0;
+
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+                trajPosture_Cubic_->setDuration(4.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(q_ref_);
+
+                reset_control_ = false;
+                mode_change_ = false;             
+            }            
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+
+            //in here, task.compute is performed right after the reference is set.
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_); 
+
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+        } 
+
+        if (ctrl_mode_ == 22){ //s //transition pos to pick bottle
+            if (mode_change_){
+                //remove                
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-16, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+                //posture (try to maintain current4 joint configuration)
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+                trajPosture_Cubic_->setDuration(4.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
+
+                //ee
+                trajEE_Cubic_->setStartTime(time_);
+                trajEE_Cubic_->setDuration(4.0);
+
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
+                trajEE_Cubic_->setInitSample(H_ee_ref_);                       
+                
+                pinocchio::SE3 T_aruco_offset;                
+                T_aruco_offset.setIdentity();
+                T_aruco_offset.translation(Vector3d(-0.02, -0.13, -0.1));
+                trajEE_Cubic_->setGoalSample(T_aruco_ * T_aruco_offset);
+
+                reset_control_ = false;
+                mode_change_ = false;                
+            }
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+
+            trajEE_Cubic_->setCurrentTime(time_);
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            eeTask_->setReference(sampleEE_);
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
+        }             
+
+        if (ctrl_mode_ == 23){ //d //bottle pick pos
+            if (mode_change_){
+                //remove                
+                tsid_->removeTask("task-se3");
+                tsid_->removeTask("task-posture");
+                tsid_->removeTask("task-torque-bounds");
+
+                //add
+                tsid_->addMotionTask(*postureTask_, 1e-16, 1);
+                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+                tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+                //posture (try to maintain current4 joint configuration)
+                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+                trajPosture_Cubic_->setDuration(4.0);
+                trajPosture_Cubic_->setStartTime(time_);
+                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
+
+                //ee
+                trajEE_Cubic_->setStartTime(time_);
+                trajEE_Cubic_->setDuration(4.0);
+
+                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
+                trajEE_Cubic_->setInitSample(H_ee_ref_);                       
+                
+                pinocchio::SE3 T_aruco_offset;                
+                T_aruco_offset.setIdentity();
+                T_aruco_offset.translation(Vector3d(-0.02, -0.10, 0.1));
+                trajEE_Cubic_->setGoalSample(T_aruco_ * T_aruco_offset);
+
+                reset_control_ = false;
+                mode_change_ = false;                
+            }
+
+            trajPosture_Cubic_->setCurrentTime(time_);
+            samplePosture_ = trajPosture_Cubic_->computeNext();
+            postureTask_->setReference(samplePosture_);
+
+            trajEE_Cubic_->setCurrentTime(time_);
+            sampleEE_ = trajEE_Cubic_->computeNext();
+            eeTask_->setReference(sampleEE_);
+
+            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
+        } 
+        
+        // --------------------------------------------------------------------------------------------------------//
+        // pick bottle with AI ------------------------------------------------------------------------------------//
+        // --------------------------------------------------------------------------------------------------------//
+        
+        // if (ctrl_mode_ == 21){ //a //init position w.r.t. bottle
+        //     if (mode_change_){
+        //         //remove                
+        //         tsid_->removeTask("task-se3");
+        //         tsid_->removeTask("task-posture");
+        //         tsid_->removeTask("task-torque-bounds");
+
+        //         //add
+        //         tsid_->addMotionTask(*postureTask_, 1e-16, 1);
+        //         tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+        //         tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+        //         //posture (try to maintain current4 joint configuration)
+        //         trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+        //         trajPosture_Cubic_->setDuration(4.0);
+        //         trajPosture_Cubic_->setStartTime(time_);
+        //         trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
+
+        //         //ee
+        //         trajEE_Cubic_->setStartTime(time_);
+        //         trajEE_Cubic_->setDuration(4.0);
+
+        //         H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
+        //         trajEE_Cubic_->setInitSample(H_ee_ref_);                       
+                
+        //         pinocchio::SE3 T_yolo_offset;                
+        //         T_yolo_offset.setIdentity();
+        //         // T_yolo_offset.translation(Vector3d(0.1, 0.1, 0.0));
+        //         trajEE_Cubic_->setGoalSample(T_yolo_ * T_yolo_offset);
+
+        //         reset_control_ = false;
+        //         mode_change_ = false;                
+        //     }
+
+        //     trajPosture_Cubic_->setCurrentTime(time_);
+        //     samplePosture_ = trajPosture_Cubic_->computeNext();
+        //     postureTask_->setReference(samplePosture_);
+
+        //     trajEE_Cubic_->setCurrentTime(time_);
+        //     sampleEE_ = trajEE_Cubic_->computeNext();
+        //     eeTask_->setReference(sampleEE_);
+
+        //     const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+        //     state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
+        // }   
+
+        // --------------------------------------------------------------------------------------------------------//
+        // impedance control ------------------------------------------------------------------------------------//
+        // --------------------------------------------------------------------------------------------------------//
+     
+        // if (ctrl_mode_ == 22){ //v //impedance control
+        //     if (mode_change_){
+        //         //remove                
+        //         tsid_->removeTask("task-se3");
+        //         tsid_->removeTask("task-posture");
+        //         tsid_->removeTask("task-torque-bounds");
+
+        //         //add
+        //         tsid_->addMotionTask(*postureTask_, 1e-6, 1);
+        //         tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
+        //         tsid_->addMotionTask(*eeTask_, 1.0, 0);
+
+        //         //posture
+        //         trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
+        //         trajPosture_Cubic_->setDuration(2.0);
+        //         trajPosture_Cubic_->setStartTime(time_);
+        //         trajPosture_Cubic_->setGoalSample(q_ref_);
+
+        //         //ee
+        //         trajEE_Cubic_->setStartTime(time_);
+        //         trajEE_Cubic_->setDuration(2.0);
+        //         H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                
+
+        //         trajEE_Cubic_->setInitSample(H_ee_ref_);
+        //         trajEE_Cubic_->setGoalSample(H_ee_ref_);
+               
+        //         reset_control_ = false;
+        //         mode_change_ = false;                                                
+        //     }
+            
+        //     trajPosture_Cubic_->setCurrentTime(time_);
+        //     samplePosture_ = trajPosture_Cubic_->computeNext();
+        //     postureTask_->setReference(samplePosture_);                        
+            
+        //     if (1) { 
+        //         //to make K(x-xd)=0, put xd=x 
+        //         H_ee_ref_.translation() = (robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_).translation();
+                
+        //         //inertia shaping    
+        //         // Me_inv_ = 
+        //         eeTask_->setDesiredinertia(Me_inv_);
+        //     }
+        //     else {   
+        //         //to make K(x-xd)=0, put K=0 
+        //         Vector6d a;
+        //         a = eeTask_->Kp();
+        //         a.head(3) << 0.0, 0.0, 0.0;
+        //         eeTask_->Kp(a); //after this task, Kp should be returned to original gain
+        //     }                        
+
+        //     SE3ToVector(H_ee_ref_, sampleEE_.pos);
+
+        //     eeTask_->setReference(sampleEE_);
+        //     //////////////////
+
+        //     const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
+        //     state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));
+        // }            
+        
         if (ctrl_mode_ == 31){ //i //move ee +0.1z
             if (mode_change_){
                 //remove                
@@ -826,99 +846,7 @@ namespace RobotController{
 
             const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
             state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));            
-        }
-
-        if (ctrl_mode_ == 40){ //c //approach to aruco marker
-            if (mode_change_){
-                //remove                
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-16, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                tsid_->addMotionTask(*eeTask_, 1.0, 0);
-
-                //posture (try to maintain current4 joint configuration)
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-                trajPosture_Cubic_->setDuration(4.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
-
-                //ee
-                trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(4.0);
-
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
-                trajEE_Cubic_->setInitSample(H_ee_ref_);                       
-                
-                pinocchio::SE3 T_aruco_offset;                
-                T_aruco_offset.setIdentity();
-                // T_aruco_offset.translation(Vector3d(0.1, 0.1, 0.0));
-                trajEE_Cubic_->setGoalSample(T_aruco_ * T_aruco_offset);
-
-                reset_control_ = false;
-                mode_change_ = false;                
-            }
-
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            trajEE_Cubic_->setCurrentTime(time_);
-            sampleEE_ = trajEE_Cubic_->computeNext();
-            eeTask_->setReference(sampleEE_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
-        }   
-
-        if (ctrl_mode_ == 41){ //d //approach to aruco marker
-            if (mode_change_){
-                //remove                
-                tsid_->removeTask("task-se3");
-                tsid_->removeTask("task-posture");
-                tsid_->removeTask("task-torque-bounds");
-
-                //add
-                tsid_->addMotionTask(*postureTask_, 1e-16, 1);
-                tsid_->addMotionTask(*torqueBoundsTask_, 1.0, 0);
-                tsid_->addMotionTask(*eeTask_, 1.0, 0);
-
-                //posture (try to maintain current4 joint configuration)
-                trajPosture_Cubic_->setInitSample(state_.q_.tail(na_));
-                trajPosture_Cubic_->setDuration(4.0);
-                trajPosture_Cubic_->setStartTime(time_);
-                trajPosture_Cubic_->setGoalSample(state_.q_.tail(na_));
-
-                //ee
-                trajEE_Cubic_->setStartTime(time_);
-                trajEE_Cubic_->setDuration(4.0);
-
-                H_ee_ref_ = robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_;                                                
-                trajEE_Cubic_->setInitSample(H_ee_ref_);                       
-                
-                pinocchio::SE3 T_yolo_offset;                
-                T_yolo_offset.setIdentity();
-                // T_yolo_offset.translation(Vector3d(0.1, 0.1, 0.0));
-                trajEE_Cubic_->setGoalSample(T_yolo_ * T_yolo_offset);
-
-                reset_control_ = false;
-                mode_change_ = false;                
-            }
-
-            trajPosture_Cubic_->setCurrentTime(time_);
-            samplePosture_ = trajPosture_Cubic_->computeNext();
-            postureTask_->setReference(samplePosture_);
-
-            trajEE_Cubic_->setCurrentTime(time_);
-            sampleEE_ = trajEE_Cubic_->computeNext();
-            eeTask_->setReference(sampleEE_);
-
-            const HQPData & HQPData = tsid_->computeProblemData(time_, state_.q_, state_.v_);
-            state_.torque_ = tsid_->getAccelerations(solver_->solve(HQPData));   
-        }   
+        }          
 
         if (ctrl_mode_ == 99){ //p //print current ee state
             if (mode_change_){
@@ -944,7 +872,10 @@ namespace RobotController{
                 trajEE_Cubic_->setInitSample(H_ee_ref_);
                 trajEE_Cubic_->setGoalSample(H_ee_ref_);
 
-                cout << H_ee_ref_ << endl;
+                // cout << H_ee_ref_ << endl;
+
+                cout << robot_->position(data_, robot_->model().getJointId("panda_joint7"))  << endl;
+                cout << robot_->position(data_, robot_->model().getJointId("panda_joint7")) * T_offset_ << endl;
 
                 reset_control_ = false;
                 mode_change_ = false;

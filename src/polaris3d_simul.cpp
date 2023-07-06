@@ -261,19 +261,19 @@ void JointStateCallback(const sensor_msgs::JointState::ConstPtr& msg){
 
 void joint_states_publish(const sensor_msgs::JointState& msg){
     // mujoco callback msg
-    // msg.position : 7(joint) + 2(gripper)
-    // msg.velocity : 7(joint) + 2(gripper) 
+    // msg.position : 7(joint) + 6(gripper)
+    // msg.velocity : 7(joint) + 6(gripper) 
 
     sensor_msgs::JointState joint_states;
     joint_states.header.stamp = ros::Time::now();    
 
-    //revolute joint name in rviz urdf (panda_arm_hand_l_rviz.urdf)
-    joint_states.name = {"panda_joint1","panda_joint2","panda_joint3","panda_joint4","panda_joint5","panda_joint6","panda_joint7","panda_finger_joint1","panda_finger_joint2"};    
+    //revolute joint name in rviz urdf (panda_arm_2f_85_d435_rviz.urdf)
+    joint_states.name = {"panda_joint1","panda_joint2","panda_joint3","panda_joint4","panda_joint5","panda_joint6","panda_joint7","finger_joint","left_inner_knuckle_joint", "left_inner_finger_joint", "right_inner_knuckle_joint", "right_inner_finger_joint", "right_outer_knuckle_joint"};    
 
-    joint_states.position.resize(9); //panda(7) + finger(2)
-    joint_states.velocity.resize(9); //panda(7) + finger(2)
+    joint_states.position.resize(13); //panda(7) + finger(6)
+    joint_states.velocity.resize(13); //panda(7) + finger(6)
 
-    for (int i=0; i<9; i++){ 
+    for (int i=0; i<13; i++){ 
         joint_states.position[i] = msg.position[i];
         joint_states.velocity[i] = msg.velocity[i];
     }    
@@ -352,62 +352,66 @@ void keyboard_event(){
                 cout << "home position" << endl;
                 cout << " " << endl;
                 break;
-            case 'a': //rotate ee in -y aixs
-                msg = 2;
-                ctrl_->ctrl_update(msg);
+
+            case 'x': //aruco marker save
+                aruco_flag_ = false;                      
                 cout << " " << endl;
-                cout << "rotate ee 15deg in -y aixs" << endl;
+                cout << "aruco marker save" << endl;
                 cout << " " << endl;
-                break;
-            case 'q': //transition pos
-                msg = 10;
-                ctrl_->ctrl_update(msg);
-                cout << " " << endl;
-                cout << "transition" << endl;
-                cout << " " << endl;
-                break;                                      
-            case 'w': //bottle recognitiono pos
+                break;               
+            
+            case 'q': //init position w.r.t ereon
                 msg = 11;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "bottle recognitiono" << endl;
+                cout << "init position w.r.t ereon" << endl;
                 cout << " " << endl;
-                break;                    
-            case 'e': //approach to target bottle
+                break;  
+            case 'w': //transition pos to place bottle
                 msg = 12;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "approach to target bottle" << endl;
+                cout << "transition pos to place bottle" << endl;
                 cout << " " << endl;
-                break;                    
-            case 'r': //bottle pick pos
+                break; 
+            case 'e': //go to ereon plate to place bottle
                 msg = 13;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "bottle pick" << endl;
+                cout << "go to ereon plate to place bottle" << endl;
                 cout << " " << endl;
-                break;                    
-            case 't': //approach to robot
-                msg = 14;
+                break;                                                   
+            
+            case 'a': //init position w.r.t. bottle
+                msg = 21;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "approach to robot" << endl;
+                cout << "init position w.r.t. bottle" << endl;
                 cout << " " << endl;
-                break;                    
-            case 'y': //bottle place pos
-                msg = 15;
-                ctrl_->ctrl_update(msg);
-                cout << " " << endl;
-                cout << "bottle place" << endl;
-                cout << " " << endl;
-                break;                      
-            case 'v': //impedance control
+                break; 
+            case 's': //transition pos to pick bottle
                 msg = 22;
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
-                cout << "impedance control" << endl;
+                cout << "transition pos to pick bottle" << endl;
                 cout << " " << endl;
-                break;                                   
+                break; 
+            case 'd': //bottle pick pos
+                msg = 23;
+                ctrl_->ctrl_update(msg);
+                cout << " " << endl;
+                cout << "bottle pick pos" << endl;
+                cout << " " << endl;
+                break;                
+                            
+            // case 'v': //impedance control
+            //     msg = 22;
+            //     ctrl_->ctrl_update(msg);
+            //     cout << " " << endl;
+            //     cout << "impedance control" << endl;
+            //     cout << " " << endl;
+            //     break;   
+
             case 'i': //move ee +0.1z
                 msg = 31;
                 ctrl_->ctrl_update(msg);
@@ -436,7 +440,7 @@ void keyboard_event(){
                 cout << " " << endl;
                 cout << "move ee -0.1 x" << endl;
                 cout << " " << endl;
-                break;    
+                break;      
             case 'u': //move ee -0.1y
                 msg = 35;
                 ctrl_->ctrl_update(msg);
@@ -449,33 +453,6 @@ void keyboard_event(){
                 ctrl_->ctrl_update(msg);
                 cout << " " << endl;
                 cout << "move ee +0.1 y" << endl;
-                cout << " " << endl;
-                break;             
-
-            case 'x': //aruco marker pos save
-                aruco_flag_ = false;                      
-                cout << " " << endl;
-                cout << "aruco marker save" << endl;
-                cout << " " << endl;
-                break;   
-            case 'c': //approach to aruco marker
-                msg = 40;
-                ctrl_->ctrl_update(msg);        
-                cout << " " << endl;
-                cout << "approach to aruco marker" << endl;
-                cout << " " << endl;
-                break;  
-            case 's': //yolo pos save
-                yolo_flag_ = false;                      
-                cout << " " << endl;
-                cout << "yolo marker save" << endl;
-                cout << " " << endl;
-                break;   
-            case 'd': //approach to yolo object
-                msg = 41;
-                ctrl_->ctrl_update(msg);        
-                cout << " " << endl;
-                cout << "approach to yolo object" << endl;
                 cout << " " << endl;
                 break;  
 
