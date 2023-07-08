@@ -273,10 +273,30 @@ void joint_states_publish(const sensor_msgs::JointState& msg){
     joint_states.position.resize(13); //panda(7) + finger(6)
     joint_states.velocity.resize(13); //panda(7) + finger(6)
 
-    for (int i=0; i<13; i++){ 
+    for (int i=0; i<7; i++){ 
         joint_states.position[i] = msg.position[i];
         joint_states.velocity[i] = msg.velocity[i];
-    }    
+    }        
+
+    //robotiq gripper    
+    //because gripper in mujoco xml (fr3_arm_2f_85_d435.xml) is modeled as franka_hand (slide), value is convert to robotiq gripper (revlout)
+    joint_states.position[0+7] = +msg.position[7]*0.725/0.04;
+    joint_states.velocity[0+7] = 0.0;
+
+    joint_states.position[1+7] = +msg.position[7]*0.725/0.04;
+    joint_states.velocity[1+7] = 0.0;
+
+    joint_states.position[2+7] = -msg.position[7]*0.725/0.04;
+    joint_states.velocity[2+7] = 0.0;
+
+    joint_states.position[3+7] = -msg.position[7]*0.725/0.04;
+    joint_states.velocity[3+7] = 0.0;
+
+    joint_states.position[4+7] = +msg.position[7]*0.725/0.04;
+    joint_states.velocity[4+7] = 0.0;
+
+    joint_states.position[5+7] = -msg.position[7]*0.725/0.04;
+    joint_states.velocity[5+7] = 0.0;
 
     joint_states_pub_.publish(joint_states);    
 }

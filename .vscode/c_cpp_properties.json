@@ -1,0 +1,39 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/kimm/kimm_catkin_polaris3d/devel/include/**",
+        "/home/kimm/kimm_catkin/devel/include/**",
+        "/opt/ros/noetic/include/**",
+        "/opt/openrobots/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/kimm_aruco/aruco/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/franka_ros/franka_control/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/franka_ros/franka_example_controllers/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/franka_ros/franka_gazebo/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/franka_ros/franka_gripper/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/franka_ros/franka_hw/include/**",
+        "/home/kimm/kimm_catkin/src/husky/husky_base/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/kimm_aruco/kimm_aruco/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/kimm_hqp_controller_phri/include/**",
+        "/home/kimm/kimm_catkin/src/kimm_object_estimation/include/**",
+        "/home/kimm/kimm_catkin/src/kimm_phri_panda_husky/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/kimm_polaris3d/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/kimm_qpoases/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/kimm_trajectory_smoother/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/kimm_mujoco_ros/mujoco_ros/include/**",
+        "/home/kimm/kimm_catkin_polaris3d/src/robotiq_2finger_grippers/robotiq_2f_gripper_control/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}

@@ -1,0 +1,16 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/kimm/kimm_catkin_polaris3d/devel/lib/python3/dist-packages",
+        "/home/kimm/kimm_catkin/devel/lib/python3/dist-packages",
+        "/opt/ros/noetic/lib/python3/dist-packages",
+        "/opt/openrobots/lib/python3.8/site-packages",
+        "/opt/openrobots/lib/python3/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/kimm/kimm_catkin_polaris3d/devel/lib/python3/dist-packages",
+        "/home/kimm/kimm_catkin/devel/lib/python3/dist-packages",
+        "/opt/ros/noetic/lib/python3/dist-packages",
+        "/opt/openrobots/lib/python3.8/site-packages",
+        "/opt/openrobots/lib/python3/dist-packages"
+    ]
+}
