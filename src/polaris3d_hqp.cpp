@@ -70,7 +70,7 @@ namespace RobotController{
         //This offset is applied to both reference (in this code) and feedback (in task_se3_equality.cpp)
         //robotiq
         joint7_to_finger_ = 0.247; //0.247 (z-axis) = 0.222(distance from link7 to left_inner_finger) + 0.025(finger center length)                 
-        this->eeoffset_update(); //pair with home position            
+        this->eeoffset_update(); 
         ///////////////////////////////////////////////////////////////////////        
 
         VectorXd ee_gain(6);        
